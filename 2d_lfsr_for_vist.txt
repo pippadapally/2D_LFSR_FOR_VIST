@@ -1,0 +1,198 @@
+module lfsr_2d (
+    input wire clk,
+    input wire rst,
+    output reg [3:0] lfsr00,
+    output reg [3:0] lfsr01,
+    output reg [3:0] lfsr10,
+    output reg [3:0] lfsr11
+);
+
+    // Feedback wires for each LFSR
+    wire feedback00, feedback01, feedback10, feedback11;
+
+    // Feedback logic for each LFSR
+    assign feedback00 = lfsr00[3] ^ lfsr00[2];
+    assign feedback01 = lfsr01[3] ^ lfsr01[2];
+    assign feedback10 = lfsr10[3] ^ lfsr10[2];
+    assign feedback11 = lfsr11[3] ^ lfsr11[2];
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            lfsr00 <= 4'hF;  // Initial values, can be any non-zero value
+            lfsr01 <= 4'hE;
+            lfsr10 <= 4'hD;
+            lfsr11 <= 4'hC;
+        end else begin
+            // Update each LFSR
+            lfsr00 <= {lfsr00[2:0], feedback00};
+            lfsr01 <= {lfsr01[2:0], feedback01};
+            lfsr10 <= {lfsr10[2:0], feedback10};
+            lfsr11 <= {lfsr11[2:0], feedback11};
+        end
+    end
+endmodule
+
+// 4:1 Multiplexer Module
+
+module mux_4to1 (
+    input wire in0,         // Input pin 0
+    input wire in1,         // Input pin 1
+    input wire in2,         // Input pin 2
+    input wire in3,         // Input pin 3
+    input wire [1:0] sel,   // 2-bit select signal
+    output reg out          // 1-bit output
+);
+
+    always @(*) begin
+        case (sel)
+            2'b00: out = in0; // Select input 0
+            2'b01: out = in1; // Select input 1
+            2'b10: out = in2; // Select input 2
+            2'b11: out = in3; // Select input 3
+            default: out = 1'b0; // Default case, should not be necessary
+        endcase
+    end
+endmodule
+
+// 4:2 Encoder Module
+
+module encoder_4to2 (
+    input wire [3:0] in,
+    output reg [1:0] out
+);
+
+    always @(*) begin
+        case (in)
+            4'b0001: out = 2'b00;
+            4'b0010: out = 2'b01;
+            4'b0100: out = 2'b10;
+            4'b1000: out = 2'b11;
+            default: out = 2'b00; // default case to handle unexpected inputs
+        endcase
+    end
+endmodule
+
+// Response Analyzer
+
+module response_analyzer (
+    input wire [1:0] encoder_out,
+    input wire [1:0] expected_out,
+    output reg error
+);
+
+    always @(*) begin
+        error = (encoder_out != expected_out);
+    end
+endmodule
+
+// BIST Pattern Generator
+
+module pattern_generator (
+    input wire clk,
+    input wire rst,
+    output reg [3:0] pattern
+);
+
+    always @(posedge clk or posedge rst) begin
+        if (rst)
+            pattern <= 4'b0001; // Initialize to some pattern
+        else
+            pattern <= {pattern[2:0], pattern[3] ^ pattern[2]}; // LFSR logic for pattern generation
+    end
+endmodule
+
+// Top BIST Module
+
+module bist (
+    input wire clk,
+    input wire rst,
+    output wire error
+);
+
+    // Wires for connecting modules
+    wire [3:0] lfsr00, lfsr01, lfsr10, lfsr11;
+    wire [1:0] sel;
+    wire [3:0] mux_out;
+    wire [1:0] encoder_out;
+    wire [1:0] expected_out;
+
+    // Instance of Pattern Generator
+    pattern_generator pg_inst (
+        .clk(clk),
+        .rst(rst),
+        .pattern(expected_out)
+    );
+
+    // 2D LFSR instance
+    lfsr_2d lfsr_inst (
+        .clk(clk),
+        .rst(rst),
+        .lfsr00(lfsr00),
+        .lfsr01(lfsr01),
+        .lfsr10(lfsr10),
+        .lfsr11(lfsr11)
+    );
+
+    // Counter for generating select signal
+    reg [1:0] counter;
+
+    always @(posedge clk or posedge rst) begin
+        if (rst)
+            counter <= 2'b00;
+        else
+            counter <= counter + 1;
+    end
+
+    assign sel = counter;
+
+    // Multiplexers for each bit of the 4-bit LFSR output
+    mux_4to1 mux_inst0 (
+        .in0(lfsr00[0]),
+        .in1(lfsr01[0]),
+        .in2(lfsr10[0]),
+        .in3(lfsr11[0]),
+        .sel(sel),
+        .out(mux_out[0])
+    );
+
+    mux_4to1 mux_inst1 (
+        .in0(lfsr00[1]),
+        .in1(lfsr01[1]),
+        .in2(lfsr10[1]),
+        .in3(lfsr11[1]),
+        .sel(sel),
+        .out(mux_out[1])
+    );
+
+    mux_4to1 mux_inst2 (
+        .in0(lfsr00[2]),
+        .in1(lfsr01[2]),
+        .in2(lfsr10[2]),
+        .in3(lfsr11[2]),
+        .sel(sel),
+        .out(mux_out[2])
+    );
+
+    mux_4to1 mux_inst3 (
+        .in0(lfsr00[3]),
+        .in1(lfsr01[3]),
+        .in2(lfsr10[3]),
+        .in3(lfsr11[3]),
+        .sel(sel),
+        .out(mux_out[3])
+    );
+
+    // 4:2 Encoder instance
+    encoder_4to2 encoder_inst (
+        .in(mux_out),
+        .out(encoder_out)
+    );
+
+    // Instance of Response Analyzer
+    response_analyzer ra_inst (
+        .encoder_out(encoder_out),
+        .expected_out(expected_out),
+        .error(error)
+    );
+
+endmodule
